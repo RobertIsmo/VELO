@@ -1,5 +1,4 @@
 import { AuthForm } from "@/components/auth-form"
-import { login } from "@/lib/auth-actions"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = {
@@ -8,5 +7,5 @@ export const metadata: Metadata = {
 }
 
 export default function LoginPage() {
-  return <AuthForm mode="login" action={login} />
+  return <AuthForm mode="login" />
 }

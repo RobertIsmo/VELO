@@ -1,12 +1,9 @@
 import Link from "next/link"
-import { createClient } from "@/lib/supabase/server"
 import { UserMenu } from "@/components/user-menu"
+import { getCurrentUser } from "@/lib/auth-actions"
 
 export async function Nav() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">

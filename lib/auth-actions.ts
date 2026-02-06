@@ -1,96 +1,165 @@
-"use server"
+'use server'
 
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
+import { Redis } from '@upstash/redis'
+import * as bcrypt from 'bcryptjs'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 
-export async function signup(formData: FormData) {
-  const supabase = await createClient()
+const redis = new Redis({
+  url: process.env.KV_REST_API_URL,
+  token: process.env.KV_REST_API_TOKEN,
+})
 
-  const username = formData.get("username") as string
-  const email = formData.get("email") as string
-  const password = formData.get("password") as string
-
-  if (!username || !email || !password) {
-    return { error: "All fields are required." }
-  }
-
-  if (username.length < 3) {
-    return { error: "Username must be at least 3 characters." }
-  }
-
-  if (password.length < 6) {
-    return { error: "Password must be at least 6 characters." }
-  }
-
-  // Check if username is already taken
-  const { data: existingUser } = await supabase
-    .from("profiles")
-    .select("username")
-    .eq("username", username)
-    .single()
-
-  if (existingUser) {
-    return { error: "Username is already taken." }
-  }
-
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: {
-        username,
-      },
-    },
-  })
-
-  if (error) {
-    return { error: error.message }
-  }
-
-  redirect("/")
+interface User {
+  id: string
+  username: string
+  email: string
+  passwordHash: string
 }
 
-export async function login(formData: FormData) {
-  const supabase = await createClient()
+function generateId() {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36)
+}
 
-  const identifier = formData.get("identifier") as string
-  const password = formData.get("password") as string
-
-  if (!identifier || !password) {
-    return { error: "All fields are required." }
-  }
-
-  let email = identifier
-
-  // If the identifier doesn't look like an email, look up the username
-  if (!identifier.includes("@")) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("username", identifier)
-      .single()
-
-    if (!profile) {
-      return { error: "Invalid username or password." }
+export async function signup(
+  username: string,
+  email: string,
+  password: string
+) {
+  try {
+    if (!username || !email || !password) {
+      return { error: 'All fields are required.' }
     }
 
-    email = profile.email
+    if (username.length < 3) {
+      return { error: 'Username must be at least 3 characters.' }
+    }
+
+    if (password.length < 6) {
+      return { error: 'Password must be at least 6 characters.' }
+    }
+
+    const existingUsername = await redis.get(`username:${username.toLowerCase()}`)
+    if (existingUsername) {
+      return { error: 'Username is already taken.' }
+    }
+
+    const existingEmail = await redis.get(`email:${email.toLowerCase()}`)
+    if (existingEmail) {
+      return { error: 'Email is already in use.' }
+    }
+
+    const salt = await bcrypt.genSalt(10)
+    const passwordHash = await bcrypt.hash(password, salt)
+
+    const userId = generateId()
+    const user: User = {
+      id: userId,
+      username,
+      email,
+      passwordHash,
+    }
+
+    await redis.set(`user:${userId}`, JSON.stringify(user))
+    await redis.set(`username:${username.toLowerCase()}`, userId)
+    await redis.set(`email:${email.toLowerCase()}`, userId)
+
+    const cookieStore = await cookies()
+    cookieStore.set('userId', userId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7,
+    })
+
+    redirect('/')
+  } catch (error) {
+    console.error('[v0] Signup error:', error)
+    return { error: 'An error occurred during signup.' }
   }
+}
 
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
+export async function login(
+  usernameOrEmail: string,
+  password: string
+) {
+  try {
+    if (!usernameOrEmail || !password) {
+      return { error: 'All fields are required.' }
+    }
 
-  if (error) {
-    return { error: "Invalid credentials." }
+    const userIdFromUsername = await redis.get(
+      `username:${usernameOrEmail.toLowerCase()}`
+    )
+    const userIdFromEmail = await redis.get(
+      `email:${usernameOrEmail.toLowerCase()}`
+    )
+
+    const userId = (userIdFromUsername as string) || (userIdFromEmail as string)
+
+    if (!userId) {
+      return { error: 'Invalid username/email or password.' }
+    }
+
+    const userData = await redis.get(`user:${userId}`)
+    if (!userData) {
+      return { error: 'Invalid username/email or password.' }
+    }
+
+    const user = JSON.parse(userData as string) as User
+    const passwordMatch = await bcrypt.compare(password, user.passwordHash)
+
+    if (!passwordMatch) {
+      return { error: 'Invalid username/email or password.' }
+    }
+
+    const cookieStore = await cookies()
+    cookieStore.set('userId', userId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7,
+    })
+
+    redirect('/')
+  } catch (error) {
+    console.error('[v0] Login error:', error)
+    return { error: 'An error occurred during login.' }
   }
-
-  redirect("/")
 }
 
 export async function logout() {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
-  redirect("/")
+  try {
+    const cookieStore = await cookies()
+    cookieStore.delete('userId')
+    redirect('/login')
+  } catch (error) {
+    console.error('[v0] Logout error:', error)
+  }
+}
+
+export async function getCurrentUser() {
+  try {
+    const cookieStore = await cookies()
+    const userId = cookieStore.get('userId')?.value
+
+    if (!userId) {
+      return null
+    }
+
+    const userData = await redis.get(`user:${userId}`)
+    if (!userData) {
+      return null
+    }
+
+    const user = JSON.parse(userData as string) as User
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+    }
+  } catch (error) {
+    console.error('[v0] Get current user error:', error)
+    return null
+  }
 }

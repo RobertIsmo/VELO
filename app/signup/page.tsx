@@ -1,5 +1,4 @@
 import { AuthForm } from "@/components/auth-form"
-import { signup } from "@/lib/auth-actions"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = {
@@ -8,5 +7,5 @@ export const metadata: Metadata = {
 }
 
 export default function SignupPage() {
-  return <AuthForm mode="signup" action={signup} />
+  return <AuthForm mode="signup" />
 }
