@@ -44,6 +44,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       setIsPending(false)
     }
   }
+
+  return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
