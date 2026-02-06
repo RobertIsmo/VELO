@@ -1,5 +1,5 @@
-import { createClient } from "@/lib/supabase/server"
 import Link from "next/link"
+import { getCurrentUser } from "@/lib/auth-actions"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = {
@@ -9,10 +9,7 @@ export const metadata: Metadata = {
 }
 
 export default async function Home() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4">
